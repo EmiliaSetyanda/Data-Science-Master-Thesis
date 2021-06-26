@@ -1,0 +1,632 @@
+#open data and load library
+library(readxl)
+BankChurners <- read_excel("University/DSMA Master/Thesis DSMA/Credit card data/BankChurners.csv/BankChurners.xlsx")
+library(factoextra)
+library(cluster)
+library(fpc)
+library(SoftClustering)
+library(tidyverse)
+library(kableExtra)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(Rtsne) #for applying t-SNE (dimension reduction to visualize K-medoid results)
+library(ppclust)
+library(stats)
+library(reshape2)
+library(fclust)
+library(splitTools)
+library(ranger)
+library(caret)
+library(randomForest)
+
+#data pre-processing
+str(BankChurners)
+BankChurners <- BankChurners[,-(22:23)] #remove the last 2 columns 
+BankChurners$CLIENTNUM <- factor(BankChurners$CLIENTNUM)
+BankChurners$female <- ifelse(BankChurners$Gender == "F", 1, 0)
+BankChurners$female <- factor(BankChurners$female)
+BankChurners$churn <- ifelse(BankChurners$Attrition_Flag == "Existing Customer", 0, 1)
+BankChurners$churn <- factor(BankChurners$churn)  
+#BankChurners$Attrition_Flag <- factor(BankChurners$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(BankChurners$Gender)
+BankChurners$Education_Level <- factor(BankChurners$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=TRUE)
+BankChurners$Marital_Status <- factor(BankChurners$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=TRUE)
+BankChurners$Income_Category <- factor(BankChurners$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = TRUE)
+BankChurners$Card_Category <- factor(BankChurners$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=TRUE)
+str(BankChurners)
+BankChurners <- BankChurners[,-c(2,4)]
+summary(BankChurners)
+
+#look at summary statistics for churn vs. no churn 
+BankChurners[,c(2:11,21)] %>% 
+  filter(churn == 0) %>%
+  summary() %>%
+  kbl(caption = "Summary Statistics for Customers Who Did Not Churn") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+BankChurners[,c(12:19, 21)] %>% 
+  filter(churn == 0) %>%
+  summary() %>%
+  kbl(caption = "Summary Statistics for Customers Who Did Not Churn") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+BankChurners[,c(2:11,21)] %>% 
+  filter(churn == 1) %>%
+  summary() %>%
+  kbl(caption = "Summary Statistics for Customers Who Churned") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+BankChurners[,c(12:19, 21)] %>% 
+  filter(churn == 1) %>%
+  summary() %>%
+  kbl(caption = "Summary Statistics for Customers Who Churned") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#trying to create boxplots for stat summary
+ggplot(BankChurners, aes(x = churn, y = Customer_Age)) +
+  geom_boxplot()
+
+numeric.data <- BankChurners[,c(2,3,8:19,21)]
+data.for.boxplots <- melt(numeric.data, id = "churn")
+fig <- function(width, heigth){
+  options(repr.plot.width = width, repr.plot.height = heigth)
+}
+fig(10, 4)
+ggplot(data.for.boxplots, aes(x=variable, y=value, fill=churn)) + 
+  geom_boxplot() +
+  facet_wrap(~variable, scale="free")
+
+#descriptive statistics for categorical variables
+table(BankChurners$Education_Level, BankChurners$churn)
+prop.table(table(BankChurners$Education_Level, BankChurners$churn))
+
+table(BankChurners$Marital_Status, BankChurners$churn)
+prop.table(table(BankChurners$Marital_Status, BankChurners$churn))
+
+table(BankChurners$Income_Category, BankChurners$churn)
+prop.table(table(BankChurners$Income_Category, BankChurners$churn))
+
+table(BankChurners$Card_Category, BankChurners$churn)
+prop.table(table(BankChurners$Card_Category, BankChurners$churn))
+
+#proportion of churning
+prop.table(table(BankChurners$churn))
+
+###########################################################
+######-------------------KMEANS----------------------------
+###########################################################
+#kmeans subset data
+kmeansdata <- BankChurners[,c(8:10,16,17)] #inactivity, length, relations, frequency, monetary
+summary(kmeansdata)
+boxplot(kmeansdata$Months_on_book, kmeansdata$Total_Relationship_Count, kmeansdata$Months_Inactive_12_mon, kmeansdata$Total_Trans_Amt, kmeansdata$Total_Trans_Ct)
+boxplot(kmeansdata$Total_Trans_Amt, plot = FALSE)
+kmeansdata <- scale(kmeansdata, center = TRUE, scale = TRUE)
+kmeansdata <- as.data.frame(kmeansdata)
+
+#distance <- get_dist(kmeansdata) #too big to be visualized
+#fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+#elbow method 1 with fviz_nbclust
+set.seed(123)
+fviz_nbclust(kmeansdata, kmeans, method = "wss") +
+  labs(title = "Scree Plot for K-Means")
+
+#elbow method 2 with own function 
+set.seed(123)
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(kmeansdata, k, iter.max = 100, nstart = 10 )$tot.withinss
+}
+#compute and plot wss for k = 1 to k = 15
+k.values <- 1:15
+#extract wss for 2-15 clusters
+wss_values <- map_dbl(k.values, wss)
+plot(k.values, wss_values,
+     type="b", pch = 19, frame = FALSE, 
+     xlab="Number of clusters K",
+     ylab="Total within-clusters sum of squares")
+
+#silhouette method 1 
+set.seed(123)
+sil.kmeans <- fviz_nbclust(kmeansdata[,-6], kmeans, method = "silhouette") +
+  labs(title = "Silhouette for K-means")
+sil.kmeans$data #silhouette for kmeans is 0.3141582
+
+#plotting the silhouette for rough kmeans
+silho.kmeans2 <- NA
+set.seed(123)
+for (i in 2:10) {
+  kmeans.final2 <- kmeans(kmeansdata, centers = i, iter.max = 100, nstart = 10)
+  sil.kmeans2 <- SIL(kmeansdata, kmeans.final2$cluster)
+  silho.kmeans2[i] <- sil.kmeans2$sil
+}
+
+plot(1:10, silho.roughkmeans,
+     xlab = "Number of clusters",
+     ylab = "Average Silhouette Width",main="Silhouette for Rough K-Means")
+lines(1:10, silho.roughkmeans)
+
+#gap statistic
+set.seed(123)
+gap_stat <- clusGap(kmeansdata, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 50)
+fviz_gap_stat(gap_stat)
+
+#compute k-means clustering with k = 2 and make the plots
+set.seed(123)
+final <- kmeans(kmeansdata, 2, nstart = 25)
+print(final)
+fviz_cluster(final, data = kmeansdata)
+#clusplot(kmeansdata[,1:5], kmeansdata$cluster, color=TRUE, shade=TRUE,
+         labels=2, lines=0, main = "K-Means Results")
+plotcluster(kmeansdata[,1:5], final$cluster)
+
+#compute summary statistics of the clusters 
+kmeansdata %>%
+  mutate(Cluster = final$cluster) %>%
+  group_by(Cluster) %>%
+  summarise_all("mean")
+
+#input the cluster and churn description in kmeansdata
+kmeansdata$cluster <- final$cluster
+kmeansdata$churn <- BankChurners$churn
+
+aggregate(cbind(Months_on_book, Total_Relationship_Count, Months_Inactive_12_mon, Total_Trans_Amt, Total_Trans_Ct, churn) ~ cluster, FUN=mean, data=kmeansdata)
+
+kmeansdata %>%
+  group_by(cluster) %>%
+  summarize(n=n(),
+            Months_on_book = mean(Months_on_book),
+            Total_Relationship_Count = mean(Total_Relationship_Count), 
+            Months_Inactive_12_mon = mean(Months_Inactive_12_mon),
+            Total_Trans_Amt = mean(Total_Trans_Amt),
+            Total_Trans_Ct = mean(Total_Trans_Ct))
+
+prop.table(table(kmeansdata$cluster, kmeansdata$churn)) 
+
+#convert results to fclust
+kmeans.converted <- ppclust2(final, "fclust")
+sil.kmeans <- Fclust.index(final, "SIL")
+sil.kmeans <- SIL(kmeansdata, final$cluster)
+
+
+###########################################################
+######-----------------ROUGH KMEANS------------------------
+###########################################################
+
+#rough kmeans subset data
+rough.kmeansdata <- BankChurners[,c(8:10,16,17)] #inactivity, length, relations, frequency, monetary
+summary(rough.kmeansdata)
+rough.kmeansdata <- scale(rough.kmeansdata, center = TRUE, scale = TRUE)
+rough.kmeansdata <- as.data.frame(rough.kmeansdata)
+
+rough.final <- RoughKMeans_LW(rough.kmeansdata, meansMatrix = 2, nClusters = 2, maxIterations = 100)
+SoftClustering:::plotRoughKMeans(rough.kmeansdata, upperMShipMatrix = rough.final$upperApprox, meansMatrix = rough.final$clusterMeans, plotDimensions = c(1,2), colouredPlot = TRUE)
+sil.roughkmeans <- SIL(rough.kmeansdata, rough.final$upperApprox) #silhouette average for rough kmeans is 0.3563982
+
+#plotting the silhouette for rough kmeans
+silho.roughkmeans <- NA
+for (i in 2:10) {
+  rough.final2 <- RoughKMeans_LW(rough.kmeansdata, meansMatrix = 2, nClusters = i, maxIterations = 100)
+  sil.roughkmeans2 <- SIL(rough.kmeansdata, rough.final2$upperApprox)
+  silho.roughkmeans[i] <- sil.roughkmeans2$sil
+}
+
+plot(1:10, silho.roughkmeans,
+     xlab = "Number of clusters",
+     ylab = "Average Silhouette Width",main="Silhouette for Rough K-Means")
+lines(1:10, silho.roughkmeans)
+
+#doing PCA so we can plot the rough kmeans 
+pca <- prcomp(rough.kmeansdata)
+plot(pca)
+summary(pca)
+
+comp <- data.frame(pca$x[,1:2]) #get the first 2 principal components
+
+silho.roughkmeans2 <- NA
+for (i in 2:10) {
+  rough.final22 <- RoughKMeans_LW(comp, meansMatrix = 2, nClusters = i, maxIterations = 100)
+  sil.roughkmeans22 <- SIL(comp, rough.final22$upperApprox)
+  silho.roughkmeans2[i] <- sil.roughkmeans22$sil
+}
+
+plot(1:10, silho.roughkmeans2,
+     xlab = "Number of clusters",
+     ylab = "Average Silhouette Width",main="Silhouette for Rough K-Means")
+lines(1:10, silho.roughkmeans2)
+
+rough.final22 <- RoughKMeans_LW(comp, meansMatrix = 2, nClusters = 2, maxIterations = 100)
+rough.plot <- SoftClustering:::plotRoughKMeans(comp, upperMShipMatrix = rough.final22$upperApprox, meansMatrix = rough.final22$clusterMeans, plotDimensions = c(1,2), colouredPlot = TRUE)
+
+#getting the rough clusters into 1 column 
+rough.clusters <- as.data.frame(rough.final$upperApprox)
+rough.clusters[3] <- ifelse(rough.clusters$V1 == 1, 1, 2)
+rough.clusters <- rough.clusters[,-c(1:2)]
+rough.clusters <- as.data.frame(rough.clusters)
+rough.kmeansdata$cluster <- rough.clusters$rough.clusters #run this if you want to add the clusters to the rough.kmeansdata
+as.factor(rough.kmeansdata$cluster)
+
+#getting the raw rough clusters into the rough.kmeansdata
+colnames(rough.clusters) <- c("C1", "C2") #renaming the variables
+rough.kmeansdata[,7:8] <- rough.clusters
+rough.kmeansdata <- rough.kmeansdata[,-6]
+rough.kmeansdata$churn <- BankChurners$churn
+
+#plotting for rough kmeans (2nd method)
+rough.tsne <- Rtsne(rough.kmeansdata, check_duplicates = FALSE)
+rough.tsne_data <- rough.tsne$Y %>%
+  data.frame() %>%
+  setNames(c("X", "Y")) %>%
+  mutate(cluster = factor(rough.clusters$rough.clusters))
+ggplot(aes(x = X, y = Y), data = rough.tsne_data) +
+  geom_point(aes(color = cluster))+
+  ggtitle("Rough K-Means for Credit Card Churn") #works but the plot looks funny
+
+# function taken from SMDM Assignment 3
+seg.summ <- function(data, groups) {
+  aggregate(data, list(groups), function(x) mean(as.numeric(x)))
+}
+rough.kmeans.results <- seg.summ(rough.kmeansdata, rough.clusters$rough.clusters)
+
+#trying to make boxplots out of the clustering result
+ggplot(rough.kmeansdata, aes(x = cluster, y = Months_on_book)) +
+  geom_boxplot()
+
+rough.boxplots <- melt(rough.kmeansdata, id = "cluster")
+rough.boxplots$cluster <- as.factor(rough.boxplots$cluster)
+fig <- function(width, heigth){
+  options(repr.plot.width = width, repr.plot.height = heigth)
+}
+fig(10, 4)
+ggplot(rough.boxplots, aes(x=variable, y=value, fill=cluster)) + 
+  geom_boxplot() +
+  facet_wrap(~variable, scale="free") +
+  ggtitle("Boxplots for Rough K-Means with 2 Clusters")
+
+#aggregating the means for clusters 1 and 2 using the real data (not scaled data)
+rough.data <- BankChurners[,c(8:10,16,17)] #inactivity, length, relations, frequency, monetary
+rough.data[,6:7] <- rough.kmeansdata[,6:7]
+rough.data$churn <- rough.kmeansdata$churn
+
+rough.data[,1:6] %>%
+  filter(C1 == 1) %>%
+  summarise_all(mean) #for cluster 1
+mean(rough.data$Months_on_book[rough.data$C1 == 1])
+mean(rough.data$Total_Trans_Amt[rough.data$C1 == 1])
+mean(rough.data$Total_Trans_Ct[rough.data$C1 == 1])
+
+rough.data[,c(1:5,7)] %>%
+  filter(C2 == 1) %>%
+  summarise_all(mean) #for cluster 2
+mean(rough.data$Months_on_book[rough.data$C2 == 1])
+mean(rough.data$Total_Trans_Amt[rough.data$C2 == 1])
+mean(rough.data$Total_Trans_Ct[rough.data$C2 == 1])
+
+#computing the proportions of churning in 2 clusters
+cluster1 <- rough.kmeansdata %>%
+  filter(C1 == 1)
+prop.table(table(cluster1$churn))
+
+cluster2 <- rough.kmeansdata %>%
+  filter(C2 == 1)
+prop.table(table(cluster2$churn))
+
+
+#######-------trying rough kmeans with 3 clusters instead------------
+rough.final3 <- RoughKMeans_LW(comp, meansMatrix = 2, nClusters = 3, maxIterations = 100)
+rough.plot <- SoftClustering:::plotRoughKMeans(comp, upperMShipMatrix = rough.final3$upperApprox, meansMatrix = rough.final3$clusterMeans, plotDimensions = c(1,2), colouredPlot = TRUE)
+
+#getting the raw data and inserting the cluster members + churn 
+rough.final33 <- RoughKMeans_LW(rough.kmeansdata[,1:5], meansMatrix = 2, nClusters = 3, maxIterations = 100)
+rough.data3 <- BankChurners[,c(8:10,16,17)] #inactivity, length, relations, frequency, monetary
+rough.data3[,6:8] <- rough.final33$upperApprox
+rough.data3$churn <- BankChurners$churn
+colnames(rough.data3)[6:8] <- c("C1", "C2", "C3")
+
+#getting the means of each variable 
+rough.data3[,1:6] %>%
+  filter(C1 == 1) %>%
+  summarise_all(mean) #for cluster 1
+mean(rough.data3$Months_on_book[rough.data3$C1 == 1])
+mean(rough.data3$Total_Trans_Amt[rough.data3$C1 == 1])
+mean(rough.data3$Total_Trans_Ct[rough.data3$C1 == 1])
+
+rough.data3[,c(1:5,7)] %>%
+  filter(C2 == 1) %>%
+  summarise_all(mean) #for cluster 2
+mean(rough.data3$Months_on_book[rough.data3$C2 == 1])
+mean(rough.data3$Total_Trans_Amt[rough.data3$C2 == 1])
+mean(rough.data3$Total_Trans_Ct[rough.data3$C2 == 1])
+
+rough.data3[,c(1:5,8)] %>%
+  filter(C3 == 1) %>%
+  summarise_all(mean) #for cluster 3
+mean(rough.data3$Months_on_book[rough.data3$C3 == 1])
+mean(rough.data3$Total_Trans_Amt[rough.data3$C3 == 1])
+mean(rough.data3$Total_Trans_Ct[rough.data3$C3 == 1])
+
+#computing the proportions of churning in 3 clusters
+cluster1.3 <- rough.data3 %>%
+  filter(C1 == 1)
+prop.table(table(cluster1.3$churn))
+
+cluster2.3 <- rough.data3 %>%
+  filter(C2 == 1)
+prop.table(table(cluster2.3$churn))
+
+cluster3.3 <- rough.data3 %>%
+  filter(C3 == 1)
+prop.table(table(cluster3.3$churn))
+
+#counting the number of obs in lower approximations for the 3 clusters
+sum(cluster1.3$C1[cluster1.3$C2 == 0 & cluster1.3$C3 == 0])
+sum(cluster2.3$C2[cluster2.3$C1 == 0 & cluster2.3$C3 == 0])
+sum(cluster3.3$C3[cluster3.3$C1 == 0 & cluster3.3$C2 == 0])
+
+write_xlsx(rough.data3, "roughdata3.xlsx")
+
+#########################################################
+######-------------------KMEDOIDS------------------------
+#########################################################
+#Checking distribution of categorical variables
+prop.table(table(BankChurners$Education_Level))
+prop.table(table(BankChurners$Income_Category))
+prop.table(table(BankChurners$Marital_Status))
+prop.table(table(BankChurners$Card_Category))
+
+#correlation plot
+library(corrplot)
+corr <- cor(BankChurners[,-c(1,4:7,20:21)])
+corrplot(corr, method="circle")
+
+kmedoidsdata <- BankChurners[,-c(1)]
+gower_dist <- daisy(kmedoidsdata, metric = "gower") #Obtain gower distances for variables in good playlist
+
+#selecting no of k
+sil_width <- c(NA)
+set.seed(123)
+for(i in 2:15){  
+  pam_fit <- pam(gower_dist, diss = TRUE, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+plot(1:15, sil_width,
+     xlab = "Number of clusters",
+     ylab = "Average Silhouette Width",main="Silhouette for K-Medoids")
+lines(1:15, sil_width)
+
+#result summary of k-medoid 
+k <- 2
+pam_fit <- pam(gower_dist, diss = TRUE, k) #silhouette for kmedoids is 0.2490123
+pam_results <- kmedoidsdata %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+pam_results$the_summary
+
+#visualizing result of k-medoid for 2 clusters
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE)
+tsne_data <- tsne_obj$Y %>%
+  data.frame() %>%
+  setNames(c("X", "Y")) %>%
+  mutate(cluster = factor(pam_fit$clustering))
+ggplot(aes(x = X, y = Y), data = tsne_data) +
+  geom_point(aes(color = cluster))+
+  ggtitle("K-Medoids for Credit Card Churn")
+
+
+#########################################################
+######----------SILHOUETTE COMPILATION-------------------
+#########################################################
+silhouette <- 2:10
+silhouette <- as.data.frame(silhouette)
+silhouette$kmeans <- sil.kmeans$data$y[2:10]
+silhouette$rough_kmeans <- silho.roughkmeans[2:10]
+silhouette$kmedoids <- sil_width[2:10]
+colnames(silhouette) <- c("No. of clusters", "K-Means", "Rough K-Means", "K-Medoids")
+
+#plotting the silhouette in 1 graph
+sil.boxplots <- melt(silhouette, id = "No. of clusters", variable.name = "Method", value.name = "Average Silhouette")
+fig <- function(width, heigth){
+  options(repr.plot.width = width, repr.plot.height = heigth)
+}
+fig(10, 4)
+ggplot(sil.boxplots, aes(x= `No. of clusters`, y=`Average Silhouette`)) + 
+  geom_line(aes(colour = Method)) +
+  ggtitle("Average Silhouette Comparison")
+
+
+#########################################################
+######----------DATA PREP FOR CHURNING PREDICTION--------
+#########################################################
+churn.data <- BankChurners
+churn.data[,22:23] <- rough.data[,6:7]
+summary(churn.data)
+churn.data$Education_Level <- factor(churn.data$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered = FALSE)
+churn.data$Marital_Status <- factor(churn.data$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered = FALSE)
+churn.data$Income_Category <- factor(churn.data$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+churn.data$Card_Category <- factor(churn.data$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered = FALSE)
+
+cluster1.data <- churn.data %>%
+  filter(C1 == 1)
+
+cluster2.data <- churn.data %>%
+  filter(C2 == 1)
+
+summary(cluster1.data)
+summary(cluster2.data)
+prop.table(table(cluster1.data$churn))
+prop.table(table(cluster2.data$churn))
+
+#Splitting cluster 1 data into 80% training and 20% testing set using stratified sampling
+set.seed(123)
+partition.1 <- partition(cluster1.data$churn,p=c(train=0.8,test=0.2),type="stratified")
+c1churn.train <- cluster1.data[partition.1$train, ]
+c1churn.test <- cluster1.data[partition.1$test, ]
+prop.table(table(c1churn.train$churn)) #checking the distribution of cluster 1 churn in training data
+prop.table(table(c1churn.test$churn)) #checking the distribution of cluster 1 churn in testing data
+
+#Splitting cluster 2 data into 80% training and 20% testing set using stratified sampling
+set.seed(123)
+partition.2 <- partition(cluster2.data$churn,p=c(train=0.8,test=0.2),type="stratified")
+c2churn.train <- cluster2.data[partition.2$train, ]
+c2churn.test <- cluster2.data[partition.2$test, ]
+prop.table(table(c2churn.train$churn)) #checking the distribution of cluster 2 churn in training data
+prop.table(table(c2churn.test$churn)) #checking the distribution of cluster 2 churn in testing data
+
+#removing unnecessary variables
+c1churn.train <- c1churn.train[,-c(1,22,23)]
+c1churn.test <- c1churn.test[,-c(1,22,23)]
+c2churn.train <- c2churn.train[,-c(1,22,23)]
+c2churn.test <- c2churn.test[,-c(1,22,23)]
+
+
+
+#########################################################
+######----------------LOGISTIC REGRESSION----------------
+#########################################################
+
+### Fit the model for cluster 1
+c1.model <- glm(churn ~ ., data = c1churn.train, family = "binomial")
+# Summarize the model
+summary(c1.model)
+# Make predictions
+c1.prob <- predict(c1.model, newdata = c1churn.test, type = "response")
+predicted.classes <- ifelse(c1.prob > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == c1churn.test$churn)
+
+#using caret package
+confusionMatrix(table(predict(c1.model, newdata = c1churn.test, type="response") >= 0.5,
+                      c1churn.test$churn == 1)) #accuracy of 95.03% and recall/sensitivity of 97.51%
+
+### Fit the model for cluster 2
+c2.model <- glm(churn ~ ., data = c2churn.train, family = "binomial")
+# Summarize the model
+summary(c2.model)
+# Make predictions
+c2.prob <- predict(c2.model, newdata = c2churn.test, type = "response")
+predicted.classes <- ifelse(c2.prob > 0.5, 1, 0)
+# Model accuracy
+mean(predicted.classes == c2churn.test$churn)
+
+#using caret package
+confusionMatrix(table(predict(c2.model, newdata = c2churn.test, type="response") >= 0.5,
+                      c2churn.test$churn == 1)) #accuracy of 89.30% and recall/sensitivity of 96.35%
+
+#########################################################
+######-----------------RANDOM FOREST---------------------
+#########################################################
+
+# for reproduciblity
+set.seed(123)
+
+# default RF model
+c1.rfmodel <- randomForest(
+  formula = churn ~ .,
+  data    = c1churn.train
+)
+
+plot(c1.rfmodel)
+which.min(c1.rfmodel$err.rate[,1]) #ntree with minimal OOB rate is 329
+
+#try with validation data
+x_test <- c1churn.test[setdiff(names(c1churn.test), "churn")]
+y_test <- c1churn.test$churn
+
+rf_oob_comp <- randomForest(
+  formula = churn ~ .,
+  data    = c1churn.train,
+  xtest   = x_test,
+  ytest   = y_test
+)
+
+# extract OOB & validation errors
+oob <- rf_oob_comp$err.rate[,1]
+validation <- rf_oob_comp$test$err.rate[,1]
+
+oob <- sqrt(rf_oob_comp$mse)
+validation <- sqrt(rf_oob_comp$test$mse)
+
+# compare error rates
+tibble::tibble(
+  `Out of Bag Error` = oob,
+  `Test error` = validation,
+  ntrees = 1:rf_oob_comp$ntree
+) %>%
+  gather(Metric, RMSE, -ntrees) %>%
+  ggplot(aes(ntrees, RMSE, color = Metric)) +
+  geom_line() +
+  scale_y_continuous() +
+  xlab("Number of trees")
+
+#try tuning mtry 
+# names of features
+features <- setdiff(names(c1churn.train), "Sale_Price")
+
+set.seed(123)
+
+m2 <- tuneRF(
+  x          = c1churn.train[features[-20]],
+  y          = c1churn.train$churn,
+  ntreeTry   = 500,
+  mtryStart  = 5,
+  stepFactor = 1.5,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+) #mtry with minimum OOB error is 15
+
+ames_ranger <- ranger(
+  formula   = churn ~ ., 
+  data      = c1churn.train, 
+  num.trees = 500,
+  mtry      = sqrt(19)
+)
+
+###########-------------GRID SEARCH----------------------
+# hyperparameter grid search
+hyper_grid <- expand.grid(
+  mtry       = seq(4, 19, by = 2),
+  node_size  = seq(2, 9, by = 1),
+  sample_size = c(.55, .632, .70, .80, 1),
+  replace = c(TRUE, FALSE),
+  OOB_RMSE   = 0
+)
+
+# total number of combinations
+nrow(hyper_grid)
+## [1] 640
+
+for(i in 1:nrow(hyper_grid)) {
+  # train model
+  model <- ranger(
+    formula         = churn ~ ., 
+    data            = c1churn.train, 
+    num.trees       = 500,
+    mtry            = hyper_grid$mtry[i],
+    min.node.size   = hyper_grid$node_size[i],
+    sample.fraction = hyper_grid$sample_size[i],
+    replace         = hyper_grid$replace[i],
+    seed            = 123
+  )
+  
+  # add OOB error to grid
+  hyper_grid$OOB_RMSE[i] <- model$prediction.error
+}
+
+hyper_grid %>% 
+  dplyr::arrange(OOB_RMSE) %>%
+  head(10) #best parameters: mtry=10, node_size=6, sample_size=0.8, OOB prediction error=0.02247580
+
+###########-------------BEST RANDOM FOREST MODEL FOR CLUSTER 1----------------------
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c(0.8,0.2), importance=TRUE) 
+print(c1.rfmodel)
+plot(c1.rfmodel)
+
+best.model.test = predict(best.model, newdata=test.data)
+table(best.model.test, test.data$target)
+confusionMatrix(best.model.test, test.data$target)
+importance(best.model)
+varImpPlot(best.model) #importance plots: Mean Decrease Accuracy and Gini
