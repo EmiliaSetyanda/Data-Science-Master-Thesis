@@ -19,6 +19,9 @@ library(splitTools)
 library(ranger)
 library(caret)
 library(randomForest)
+library(writexl)
+library(broom)
+library(car)
 
 #data pre-processing
 str(BankChurners)
@@ -290,6 +293,7 @@ rough.data <- BankChurners[,c(8:10,16,17)] #inactivity, length, relations, frequ
 rough.data[,6:7] <- rough.kmeansdata[,6:7]
 rough.data$churn <- rough.kmeansdata$churn
 
+#descriptive statistics of the clusters
 rough.data[,1:6] %>%
   filter(C1 == 1) %>%
   summarise_all(mean) #for cluster 1
@@ -456,8 +460,8 @@ cluster2.data <- churn.data %>%
 
 summary(cluster1.data)
 summary(cluster2.data)
-prop.table(table(cluster1.data$churn))
-prop.table(table(cluster2.data$churn))
+prop.table(table(cluster1.data$churn)) #88.69% nonchurn and 11.31% churn
+prop.table(table(cluster2.data$churn)) #82.36% nonchurn and 17.64% churn
 
 #Splitting cluster 1 data into 80% training and 20% testing set using stratified sampling
 set.seed(123)
@@ -481,12 +485,159 @@ c1churn.test <- c1churn.test[,-c(1,22,23)]
 c2churn.train <- c2churn.train[,-c(1,22,23)]
 c2churn.test <- c2churn.test[,-c(1,22,23)]
 
-
+write_xlsx(rough.data, "roughdata.xlsx")
+write_xlsx(churn.data, "churndata.xlsx")
+write_xlsx(cluster1.data, "cluster1data.xlsx")
+write_xlsx(cluster2.data, "cluster2data.xlsx")
+write_xlsx(c1churn.train, "c1churntrain.xlsx")
+write_xlsx(c1churn.test, "c1churntest.xlsx")
+write_xlsx(c2churn.train, "c2churntrain.xlsx")
+write_xlsx(c2churn.test, "c2churntest.xlsx")
 
 #########################################################
 ######----------------LOGISTIC REGRESSION----------------
 #########################################################
+cluster1data <- read_excel("cluster1data.xlsx")
+cluster2data <- read_excel("cluster2data.xlsx")
+c1churntest <- read_excel("c1churntest.xlsx")
+c1churntrain <- read_excel("c1churntrain.xlsx")
+c2churntest <- read_excel("c2churntest.xlsx")
+c2churntrain <- read_excel("c2churntrain.xlsx")
 
+###STRUCTURING DATA......(AGAIN, YES)
+str(cluster1data)
+#cluster1data <- cluster1data[,-(22:23)] #remove the last 2 columns 
+#cluster1data$CLIENTNUM <- factor(cluster1data$CLIENTNUM)
+#cluster1data$female <- ifelse(cluster1data$Gender == "F", 1, 0)
+cluster1data$female <- factor(cluster1data$female)
+#cluster1data$churn <- ifelse(cluster1data$Attrition_Flag == "Existing Customer", 0, 1)
+cluster1data$churn <- factor(cluster1data$churn)  
+#BankChurners$Attrition_Flag <- factor(BankChurners$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(BankChurners$Gender)
+cluster1data$Education_Level <- factor(cluster1data$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+cluster1data$Marital_Status <- factor(cluster1data$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+cluster1data$Income_Category <- factor(cluster1data$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+cluster1data$Card_Category <- factor(cluster1data$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+str(cluster2data)
+#cluster2data <- cluster2data[,-(22:23)] #remove the last 2 columns 
+#cluster2data$CLIENTNUM <- factor(cluster2data$CLIENTNUM)
+#cluster2data$female <- ifelse(cluster2data$Gender == "F", 1, 0)
+cluster2data$female <- factor(cluster2data$female)
+#cluster2data$churn <- ifelse(cluster2data$Attrition_Flag == "Existing Customer", 0, 1)
+cluster2data$churn <- factor(cluster2data$churn)  
+#BankChurners$Attrition_Flag <- factor(BankChurners$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(BankChurners$Gender)
+cluster2data$Education_Level <- factor(cluster2data$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+cluster2data$Marital_Status <- factor(cluster2data$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+cluster2data$Income_Category <- factor(cluster2data$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+cluster2data$Card_Category <- factor(cluster2data$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+str(c1churntrain)
+#c1churntrain <- c1churntrain[,-(22:23)] #remove the last 2 columns 
+#c1churntrain$CLIENTNUM <- factor(c1churntrain$CLIENTNUM)
+#c1churntrain$female <- ifelse(c1churntrain$Gender == "F", 1, 0)
+c1churntrain$female <- factor(c1churntrain$female)
+#c1churntrain$churn <- ifelse(c1churntrain$Attrition_Flag == "Existing Customer", 0, 1)
+c1churntrain$churn <- factor(c1churntrain$churn)  
+#BankChurners$Attrition_Flag <- factor(BankChurners$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(BankChurners$Gender)
+c1churntrain$Education_Level <- factor(c1churntrain$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+c1churntrain$Marital_Status <- factor(c1churntrain$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+c1churntrain$Income_Category <- factor(c1churntrain$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+c1churntrain$Card_Category <- factor(c1churntrain$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+str(c1churntest)
+#c1churntest <- c1churntest[,-(22:23)] #remove the last 2 columns 
+#c1churntest$CLIENTNUM <- factor(c1churntest$CLIENTNUM)
+#c1churntest$female <- ifelse(c1churntest$Gender == "F", 1, 0)
+c1churntest$female <- factor(c1churntest$female)
+#c1churntest$churn <- ifelse(c1churntest$Attrition_Flag == "Existing Customer", 0, 1)
+c1churntest$churn <- factor(c1churntest$churn)  
+#BankChurners$Attrition_Flag <- factor(c1churntest$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(c1churntest$Gender)
+c1churntest$Education_Level <- factor(c1churntest$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+c1churntest$Marital_Status <- factor(c1churntest$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+c1churntest$Income_Category <- factor(c1churntest$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+c1churntest$Card_Category <- factor(c1churntest$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+str(c2churntrain)
+#c2churntrain <- c2churntrain[,-(22:23)] #remove the last 2 columns 
+#c2churntrain$CLIENTNUM <- factor(c2churntrain$CLIENTNUM)
+#c2churntrain$female <- ifelse(c2churntrain$Gender == "F", 1, 0)
+c2churntrain$female <- factor(c2churntrain$female)
+#c2churntrain$churn <- ifelse(c2churntrain$Attrition_Flag == "Existing Customer", 0, 1)
+c2churntrain$churn <- factor(c2churntrain$churn)  
+#BankChurners$Attrition_Flag <- factor(c2churntrain$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(c2churntrain$Gender)
+c2churntrain$Education_Level <- factor(c2churntrain$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+c2churntrain$Marital_Status <- factor(c2churntrain$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+c2churntrain$Income_Category <- factor(c2churntrain$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+c2churntrain$Card_Category <- factor(c2churntrain$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+str(c2churntest)
+#c2churntest <- c2churntest[,-(22:23)] #remove the last 2 columns 
+#c2churntest$CLIENTNUM <- factor(c2churntest$CLIENTNUM)
+#c2churntest$female <- ifelse(c2churntest$Gender == "F", 1, 0)
+c2churntest$female <- factor(c2churntest$female)
+#c2churntest$churn <- ifelse(c2churntest$Attrition_Flag == "Existing Customer", 0, 1)
+c2churntest$churn <- factor(c2churntest$churn)  
+#BankChurners$Attrition_Flag <- factor(c2churntest$Attrition_Flag, levels=c("Existing Customer", "Attrited Customer"), ordered=TRUE)
+#BankChurners$Gender <- factor(c2churntest$Gender)
+c2churntest$Education_Level <- factor(c2churntest$Education_Level, levels=c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate"), ordered=FALSE)
+c2churntest$Marital_Status <- factor(c2churntest$Marital_Status, levels=c("Single", "Married", "Divorced"), ordered=FALSE)
+c2churntest$Income_Category <- factor(c2churntest$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
+c2churntest$Card_Category <- factor(c2churntest$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
+
+
+logit.model <- glm(churn ~., data = BankChurners[,-1], family = "binomial")
+logit.prob <- predict(logit.model, type = "response")
+predicted.classes <- ifelse(logit.prob > 0.5, 1, 0)
+head(predicted.classes)
+
+###-----------CHECKING ASSUMPTIONS----------------
+##1. LINEARITY ASSUMPTION 
+# Select only numeric predictors
+numeric.data <- BankChurners %>%
+  dplyr::select_if(is.numeric) 
+predictors <- colnames(numeric.data)
+# Bind the logit and tidying the data for plot
+numeric.data <- numeric.data %>%
+  mutate(logit = log(logit.prob/(1-logit.prob))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+ggplot(numeric.data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y") +
+  labs(title = "Checking for linearity between the numerical predictors and logit-transformed Churn variable as a response", x = "Logit of Churn", y = "Predictor value")
+
+##2. INFLUENTIAL OBSERVATION ASSUMPTION 
+plot(logit.model, which = 4, id.n = 3)
+
+# Extract model results
+model.data <- augment(logit.model) %>% 
+  mutate(index = 1:n()) 
+model.data %>% top_n(3, .cooksd)
+ggplot(model.data, aes(index, .std.resid)) + 
+  geom_point(aes(color = churn), alpha = .5) +
+  theme_bw() +
+  labs(title = "Checking for influential observations", x = "Observation", y = "Standardized residual")
+
+##3. MULTICOLLINEARITY ASSUMPTION 
+car::vif(logit.model)
+vif(logit.model) #seems to be high correlation between Avg_Open_To_Buy and Credit_Limit    
+logit.model <- glm(churn ~., data = BankChurners[,-c(1)], family = "binomial")
+vif <- as.data.frame(rownames(vif(logit.model))) 
+vif[,2] <- vif(logit.model)[,1]
+colnames(vif) <- c("Variable", "VIF")
+logit.model2 <- glm(churn ~., data = BankChurners[,-c(1,14)], family = "binomial")
+vif[1:12,3] <- vif(logit.model2)[1:12,1]
+vif[14:19,3] <- vif(logit.model2)[13:18,1]
+write_xlsx(vif, "vif.xlsx")
+
+###------------DOING THE LOGISTIC REGRESSION--------------
 ### Fit the model for cluster 1
 c1.model <- glm(churn ~ ., data = c1churn.train, family = "binomial")
 # Summarize the model
@@ -620,13 +771,80 @@ hyper_grid %>%
   head(10) #best parameters: mtry=10, node_size=6, sample_size=0.8, OOB prediction error=0.02247580
 
 ###########-------------BEST RANDOM FOREST MODEL FOR CLUSTER 1----------------------
+#with mtry=10, node_size=6, sample_size=80/20
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
 set.seed(123)
-c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c(0.8,0.2), importance=TRUE) 
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.2),'0'=as.integer(len_nochurn*0.8)), importance=TRUE) 
 print(c1.rfmodel)
 plot(c1.rfmodel)
 
-best.model.test = predict(best.model, newdata=test.data)
-table(best.model.test, test.data$target)
-confusionMatrix(best.model.test, test.data$target)
-importance(best.model)
-varImpPlot(best.model) #importance plots: Mean Decrease Accuracy and Gini
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn)
+importance(c1.rfmodel)
+varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#THE BEST: with mtry=10, node_size=6, sample_size=0.8 or 80/80 
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.8),'0'=as.integer(len_nochurn*0.8)), importance=TRUE) 
+print(c1.rfmodel)
+plot(c1.rfmodel)
+
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn)
+importance(c1.rfmodel)
+varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=14, node_size=5, sample_size=0.632, replace=false, #OOB error 0.02143845
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=14, nodesize=5, replace=FALSE, sampsize=c('1'=as.integer(len_churn*0.632),'0'=as.integer(len_nochurn*0.632)), importance=TRUE) 
+print(c1.rfmodel)
+plot(c1.rfmodel)
+
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn)
+importance(c1.rfmodel)
+varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+###########-------------WITH RANGER, BEST RANDOM FOREST MODEL FOR CLUSTER 1----------------------
+c1.ranger <- ranger(
+  formula = churn ~ ., 
+  data = c1churn.train, 
+  num.trees = 500,
+  mtry = 14,
+  min.node.size = 5,
+  sample.fraction = .632,
+  replace = FALSE,
+  importance = "impurity",
+  seed  = 123
+)
+c1.ranger
+
+c1.rangertest = predict(c1.ranger, data=c1churn.test)
+table(c1.rangertest$predictions, c1churn.test$churn)
+confusionMatrix(c1.rangertest$predictions, c1churn.test$churn) #accuracy=97.51%, sensitivity=99.53%, specificity=81.71% 
+
+###try again
+c1.ranger <- ranger(
+  formula = churn ~ ., 
+  data = c1churn.train, 
+  num.trees = 500,
+  mtry = 10,
+  min.node.size = 6,
+  sample.fraction = .8,
+  replace = TRUE,
+  importance = "impurity",
+  seed  = 123
+)
+c1.ranger
+
+c1.rangertest = predict(c1.ranger, data=c1churn.test)
+table(c1.rangertest$predictions, c1churn.test$churn)
+confusionMatrix(c1.rangertest$predictions, c1churn.test$churn) #accuracy=97.65%, sensitivity=99.53%, specificity=82.93% 
