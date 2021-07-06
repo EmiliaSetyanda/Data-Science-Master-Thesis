@@ -497,6 +497,7 @@ write_xlsx(c2churn.test, "c2churntest.xlsx")
 #########################################################
 ######----------------LOGISTIC REGRESSION----------------
 #########################################################
+setwd("C:/Users/t-esetyanda/Downloads/Thesis")
 cluster1data <- read_excel("cluster1data.xlsx")
 cluster2data <- read_excel("cluster2data.xlsx")
 c1churntest <- read_excel("c1churntest.xlsx")
@@ -504,7 +505,7 @@ c1churntrain <- read_excel("c1churntrain.xlsx")
 c2churntest <- read_excel("c2churntest.xlsx")
 c2churntrain <- read_excel("c2churntrain.xlsx")
 
-###STRUCTURING DATA......(AGAIN, YES)
+###----------------STRUCTURING DATA...(AGAIN, YES)----------
 str(cluster1data)
 #cluster1data <- cluster1data[,-(22:23)] #remove the last 2 columns 
 #cluster1data$CLIENTNUM <- factor(cluster1data$CLIENTNUM)
@@ -589,7 +590,12 @@ c2churntest$Marital_Status <- factor(c2churntest$Marital_Status, levels=c("Singl
 c2churntest$Income_Category <- factor(c2churntest$Income_Category, levels=c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +"), ordered = FALSE)
 c2churntest$Card_Category <- factor(c2churntest$Card_Category, levels=c("Blue", "Silver", "Gold", "Platinum"), ordered=FALSE)
 
+c1churn.train <- c1churntrain
+c1churn.test <- c1churntest
+c2churn.train <- c2churntrain
+c2churn.test <- c2churntest
 
+###BASIC MODEL FOR ASSUMPTION CHECKS
 logit.model <- glm(churn ~., data = BankChurners[,-1], family = "binomial")
 logit.prob <- predict(logit.model, type = "response")
 predicted.classes <- ifelse(logit.prob > 0.5, 1, 0)
@@ -639,47 +645,64 @@ write_xlsx(vif, "vif.xlsx")
 
 ###------------DOING THE LOGISTIC REGRESSION--------------
 ### Fit the model for cluster 1
-c1.model <- glm(churn ~ ., data = c1churn.train, family = "binomial")
+c1.model <- glm(churn ~ ., data = c1churn.train[,-13], family = "binomial")
 # Summarize the model
 summary(c1.model)
 # Make predictions
-c1.prob <- predict(c1.model, newdata = c1churn.test, type = "response")
+c1.prob <- predict(c1.model, newdata = c1churn.test[,-13], type = "response")
 predicted.classes <- ifelse(c1.prob > 0.5, 1, 0)
 # Model accuracy
 mean(predicted.classes == c1churn.test$churn)
 
 #using caret package
-confusionMatrix(table(predict(c1.model, newdata = c1churn.test, type="response") >= 0.5,
-                      c1churn.test$churn == 1)) #accuracy of 95.03% and recall/sensitivity of 97.51%
+confusionMatrix(table(predict(c1.model, newdata = c1churn.test[,-13], type="response") >= 0.5,
+                      c1churn.test$churn == 1)) #accuracy of 95.03% and sensitivity of 97.51%, specificity=75.61%
 
 ### Fit the model for cluster 2
-c2.model <- glm(churn ~ ., data = c2churn.train, family = "binomial")
+c2.model <- glm(churn ~ ., data = c2churn.train[,-13], family = "binomial")
 # Summarize the model
 summary(c2.model)
 # Make predictions
-c2.prob <- predict(c2.model, newdata = c2churn.test, type = "response")
+c2.prob <- predict(c2.model, newdata = c2churn.test[,-13], type = "response")
 predicted.classes <- ifelse(c2.prob > 0.5, 1, 0)
 # Model accuracy
 mean(predicted.classes == c2churn.test$churn)
 
 #using caret package
-confusionMatrix(table(predict(c2.model, newdata = c2churn.test, type="response") >= 0.5,
-                      c2churn.test$churn == 1)) #accuracy of 89.30% and recall/sensitivity of 96.35%
+confusionMatrix(table(predict(c2.model, newdata = c2churn.test[,-13], type="response") >= 0.5,
+                      c2churn.test$churn == 1)) #accuracy of 90.86% and recall/sensitivity of 96.57%, specificity=64.26%
 
 #########################################################
 ######-----------------RANDOM FOREST---------------------
 #########################################################
-
 # for reproduciblity
 set.seed(123)
-
-# default RF model
+# default RF model for cluster 1 (untuned)
 c1.rfmodel <- randomForest(
   formula = churn ~ .,
   data    = c1churn.train
 )
-
+print(c1.rfmodel)
+confusionMatrix(c1.rfmodel$predicted, c1churn.train$churn)
 plot(c1.rfmodel)
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn)
+
+# for reproduciblity
+set.seed(123)
+# default RF model for cluster 2 (untuned)
+c2.rfmodel <- randomForest(
+  formula = churn ~ .,
+  data    = c2churn.train
+)
+plot(c2.rfmodel)
+print(c2.rfmodel)
+confusionMatrix(c2.rfmodel$predicted, c2churn.train$churn)
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn)
+
 which.min(c1.rfmodel$err.rate[,1]) #ntree with minimal OOB rate is 329
 
 #try with validation data
@@ -735,19 +758,19 @@ ames_ranger <- ranger(
   mtry      = sqrt(19)
 )
 
-###########-------------GRID SEARCH----------------------
+###########-------------GRID SEARCH FOR CLUSTER 1----------------------
 # hyperparameter grid search
 hyper_grid <- expand.grid(
   mtry       = seq(4, 19, by = 2),
   node_size  = seq(2, 9, by = 1),
   sample_size = c(.55, .632, .70, .80, 1),
-  replace = c(TRUE, FALSE),
+  #replace = c(TRUE, FALSE),
   OOB_RMSE   = 0
 )
 
 # total number of combinations
 nrow(hyper_grid)
-## [1] 640
+## [1] 320
 
 for(i in 1:nrow(hyper_grid)) {
   # train model
@@ -758,7 +781,7 @@ for(i in 1:nrow(hyper_grid)) {
     mtry            = hyper_grid$mtry[i],
     min.node.size   = hyper_grid$node_size[i],
     sample.fraction = hyper_grid$sample_size[i],
-    replace         = hyper_grid$replace[i],
+    #replace         = hyper_grid$replace[i],
     seed            = 123
   )
   
@@ -776,26 +799,55 @@ len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
 len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
 set.seed(123)
 c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.2),'0'=as.integer(len_nochurn*0.8)), importance=TRUE) 
-print(c1.rfmodel)
+print(c1.rfmodel) #OOB ERROR: 4.81%
 plot(c1.rfmodel)
 
 c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
 table(c1.rftest, c1churn.test$churn)
-confusionMatrix(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn) #ACCURACY: 95.58%, RECALL: 62.20%
 importance(c1.rfmodel)
 varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
 
-#THE BEST: with mtry=10, node_size=6, sample_size=0.8 or 80/80 
+#with mtry=10, node_size=6, sample_size=0.8 or 80/80 
 len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
 len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
 set.seed(123)
 c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.8),'0'=as.integer(len_nochurn*0.8)), importance=TRUE) 
-print(c1.rfmodel)
+print(c1.rfmodel) #OOB ERROR: 2.39%
 plot(c1.rfmodel)
 
 c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
 table(c1.rftest, c1churn.test$churn)
-confusionMatrix(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn) #ACCURACY: 97.65%, RECALL: 82.93%
+importance(c1.rfmodel)
+varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=10, node_size=6, sample_size=0.2 or 20/20 
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.2),'0'=as.integer(len_nochurn*0.2)), importance=TRUE) 
+print(c1.rfmodel) #OOB ERROR: 3.15%
+plot(c1.rfmodel)
+
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn) #ACCURACY: 96.55%, RECALL: 74.39%
+importance(c1.rfmodel)
+varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#THE BEST RECALL: with mtry=10, node_size=6, sample_size=80 CHURN/20 NOCHURN
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.8),'0'=as.integer(len_nochurn*0.2)), importance=TRUE) 
+print(c1.rfmodel) #OOB ERROR: 3.01%
+confusionMatrix(c1.rfmodel$predicted, c1churn.train$churn)
+plot(c1.rfmodel)
+
+c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
+table(c1.rftest, c1churn.test$churn)
+confusionMatrix(c1.rftest, c1churn.test$churn) #ACCURACY: 97.38%, RECALL: 93.90%
 importance(c1.rfmodel)
 varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
 
@@ -813,7 +865,7 @@ confusionMatrix(c1.rftest, c1churn.test$churn)
 importance(c1.rfmodel)
 varImpPlot(c1.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
 
-###########-------------WITH RANGER, BEST RANDOM FOREST MODEL FOR CLUSTER 1----------------------
+###########-------------WITH RANGER, BEST RANDOM FOREST MODEL FOR CLUSTER 1 (NOT USED)----------------------
 c1.ranger <- ranger(
   formula = churn ~ ., 
   data = c1churn.train, 
@@ -848,3 +900,126 @@ c1.ranger
 c1.rangertest = predict(c1.ranger, data=c1churn.test)
 table(c1.rangertest$predictions, c1churn.test$churn)
 confusionMatrix(c1.rangertest$predictions, c1churn.test$churn) #accuracy=97.65%, sensitivity=99.53%, specificity=82.93% 
+
+###########-------------GRID SEARCH FOR CLUSTER 2----------------------
+# hyperparameter grid search
+hyper_grid2 <- expand.grid(
+  mtry       = seq(4, 19, by = 2),
+  node_size  = seq(2, 9, by = 1),
+  sample_size = c(.55, .632, .70, .80, 1),
+  replace = c(TRUE, FALSE),
+  OOB_RMSE   = 0
+)
+
+# total number of combinations
+nrow(hyper_grid2)
+## [1] 320
+
+for(i in 1:nrow(hyper_grid2)) {
+  # train model
+  model <- ranger(
+    formula         = churn ~ ., 
+    data            = c2churn.train, 
+    num.trees       = 500,
+    mtry            = hyper_grid2$mtry[i],
+    min.node.size   = hyper_grid2$node_size[i],
+    sample.fraction = hyper_grid2$sample_size[i],
+    replace         = hyper_grid2$replace[i],
+    seed            = 123
+  )
+  
+  # add OOB error to grid
+  hyper_grid2$OOB_RMSE[i] <- model$prediction.error
+}
+
+hyper_grid2 %>% 
+  dplyr::arrange(OOB_RMSE) %>%
+  head(10) #best parameters: mtry=8, node_size=4, sample_size=0.7, OOB prediction error=0.04043761
+
+###########-------------BEST RANDOM FOREST MODEL FOR CLUSTER 2----------------------
+#THE BEST: with mtry=8, node_size=4, sample_size=70/30
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.7),'0'=as.integer(len_nochurn*0.3)), importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 4.82%
+confusionMatrix(c2.rfmodel$predicted, c2churn.train$churn)
+plot(c2.rfmodel)
+
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 95.35%, RECALL: 84.95%
+importance(c2.rfmodel)
+varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=8, node_size=5, sample_size=70/30, replace=FALSE
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=5, sampsize=c('1'=as.integer(len_churn*0.7),'0'=as.integer(len_nochurn*0.3)), replace = FALSE, importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 4.75%
+plot(c2.rfmodel)
+
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 95.79%, RECALL: 86.52%
+importance(c2.rfmodel)
+varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=8, node_size=4, sample_size=30/70
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.3),'0'=as.integer(len_nochurn*0.7)), importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 8.25%
+plot(c2.rfmodel)
+
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 91.81%, RECALL: 55.17%
+importance(c2.rfmodel)
+varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=8, node_size=4, sample_size=70/70
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.7),'0'=as.integer(len_nochurn*0.7)), importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 5.32%
+plot(c2.rfmodel)
+
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 95.02%, RECALL: 76.49%
+importance(c2.rfmodel)
+varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+#with mtry=8, node_size=4, sample_size=30/30
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.3),'0'=as.integer(len_nochurn*0.3)), importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 6.72%
+plot(c2.rfmodel)
+
+c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
+table(c2.rftest, c2churn.test$churn)
+confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 93.74%, RECALL: 69.28%
+importance(c2.rfmodel)
+varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
+
+c2.ranger <- ranger(
+  formula = churn ~ ., 
+  data = c2churn.train, 
+  num.trees = 500,
+  mtry = 8,
+  min.node.size = 4,
+  sample.fraction = .7,
+  importance = "impurity",
+  seed  = 123
+)
+c2.ranger
+table(c2.ranger$predictions, c2churn.train$churn)
+c1.rangertest = predict(c1.ranger, data=c1churn.test)
+table(c1.rangertest$predictions, c1churn.test$churn)
+confusionMatrix(c1.rangertest$predictions, c1churn.test$churn) #accuracy=97.51%, sensitivity=99.53%, specificity=81.71% 
