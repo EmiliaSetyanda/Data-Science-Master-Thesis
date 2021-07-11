@@ -22,6 +22,7 @@ library(randomForest)
 library(writexl)
 library(broom)
 library(car)
+library(iml)
 
 #data pre-processing
 str(BankChurners)
@@ -497,7 +498,6 @@ write_xlsx(c2churn.test, "c2churntest.xlsx")
 #########################################################
 ######----------------LOGISTIC REGRESSION----------------
 #########################################################
-setwd("C:/Users/t-esetyanda/Downloads/Thesis")
 cluster1data <- read_excel("cluster1data.xlsx")
 cluster2data <- read_excel("cluster2data.xlsx")
 c1churntest <- read_excel("c1churntest.xlsx")
@@ -683,7 +683,6 @@ c1.rfmodel <- randomForest(
   data    = c1churn.train
 )
 print(c1.rfmodel)
-confusionMatrix(c1.rfmodel$predicted, c1churn.train$churn)
 plot(c1.rfmodel)
 c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
 table(c1.rftest, c1churn.test$churn)
@@ -698,7 +697,6 @@ c2.rfmodel <- randomForest(
 )
 plot(c2.rfmodel)
 print(c2.rfmodel)
-confusionMatrix(c2.rfmodel$predicted, c2churn.train$churn)
 c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
 table(c2.rftest, c2churn.test$churn)
 confusionMatrix(c2.rftest, c2churn.test$churn)
@@ -842,7 +840,6 @@ len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
 set.seed(123)
 c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.8),'0'=as.integer(len_nochurn*0.2)), importance=TRUE) 
 print(c1.rfmodel) #OOB ERROR: 3.01%
-confusionMatrix(c1.rfmodel$predicted, c1churn.train$churn)
 plot(c1.rfmodel)
 
 c1.rftest = predict(c1.rfmodel, newdata=c1churn.test)
@@ -943,7 +940,6 @@ len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
 set.seed(123)
 c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.7),'0'=as.integer(len_nochurn*0.3)), importance=TRUE) 
 print(c2.rfmodel) #OOB ERROR: 4.82%
-confusionMatrix(c2.rfmodel$predicted, c2churn.train$churn)
 plot(c2.rfmodel)
 
 c2.rftest = predict(c2.rfmodel, newdata=c2churn.test)
@@ -1008,18 +1004,91 @@ confusionMatrix(c2.rftest, c2churn.test$churn) #ACCURACY: 93.74%, RECALL: 69.28%
 importance(c2.rfmodel)
 varImpPlot(c2.rfmodel) #importance plots: Mean Decrease Accuracy and Gini
 
-c2.ranger <- ranger(
-  formula = churn ~ ., 
-  data = c2churn.train, 
-  num.trees = 500,
-  mtry = 8,
-  min.node.size = 4,
-  sample.fraction = .7,
-  importance = "impurity",
-  seed  = 123
-)
-c2.ranger
-table(c2.ranger$predictions, c2churn.train$churn)
-c1.rangertest = predict(c1.ranger, data=c1churn.test)
-table(c1.rangertest$predictions, c1churn.test$churn)
-confusionMatrix(c1.rangertest$predictions, c1churn.test$churn) #accuracy=97.51%, sensitivity=99.53%, specificity=81.71% 
+###########-------------ALE PLOTS FOR RANDOM FOREST for cluster 1----------------------
+len_churn <- nrow(c1churn.train[c1churn.train$churn==1,])
+len_nochurn <- nrow(c1churn.train[c1churn.train$churn==0,])
+set.seed(123)
+c1.rfmodel <-randomForest(churn~.,data=c1churn.train, ntree=500, mtry=10, nodesize=6, sampsize=c('1'=as.integer(len_churn*0.8),'0'=as.integer(len_nochurn*0.2)), importance=TRUE) 
+print(c1.rfmodel) #OOB ERROR: 3.01%
+
+X <- c1churn.train[which(names(c1churn.train) != "churn")]
+
+predictor <- Predictor$new(c1.rfmodel, 
+                           data = X, 
+                           y = c1churn.train$churn,
+                           class = "1")
+
+ale <- FeatureEffect$new(predictor, feature = "Dependent_count", method="ale")
+ale$plot()
+
+ale$set.feature("Months_on_book")
+ale$plot()
+
+ale$set.feature("Total_Relationship_Count")
+ale$plot()
+
+ale$set.feature("Contacts_Count_12_mon")
+ale$plot()
+
+ale$set.feature("Total_Revolving_Bal")
+ale$plot()
+
+ale$set.feature("Total_Trans_Amt")
+ale$plot()
+
+ale$set.feature("Total_Trans_Ct")
+ale$plot()
+
+ale$set.feature("Total_Amt_Chng_Q4_Q1")
+ale$plot()
+
+ale$set.feature("Total_Ct_Chng_Q4_Q1")
+ale$plot()
+
+###########-------------ALE PLOTS FOR RANDOM FOREST for cluster 2----------------------
+#THE BEST: with mtry=8, node_size=4, sample_size=70/30
+len_churn2 <- nrow(c2churn.train[c2churn.train$churn==1,])
+len_nochurn2 <- nrow(c2churn.train[c2churn.train$churn==0,])
+set.seed(123)
+c2.rfmodel <-randomForest(churn~.,data=c2churn.train, ntree=500, mtry=8, nodesize=4, sampsize=c('1'=as.integer(len_churn*0.7),'0'=as.integer(len_nochurn*0.3)), importance=TRUE) 
+print(c2.rfmodel) #OOB ERROR: 4.82%
+
+X2 <- c2churn.train[which(names(c2churn.train) != "churn")]
+
+predictor2 <- Predictor$new(c2.rfmodel, 
+                           data = X2, 
+                           y = c2churn.train$churn,
+                           class = "1")
+
+ale2 <- FeatureEffect$new(predictor2, feature = "Dependent_count", method="ale")
+ale2$plot()
+
+ale2$set.feature("Total_Relationship_Count")
+ale2$plot()
+
+ale2$set.feature("Months_Inactive_12_mon")
+ale2$plot()
+
+ale2$set.feature("Contacts_Count_12_mon")
+ale2$plot()
+
+ale2$set.feature("Credit_Limit")
+ale2$plot()
+
+ale2$set.feature("Total_Revolving_Bal")
+ale2$plot()
+
+ale2$set.feature("Total_Amt_Chng_Q4_Q1")
+ale2$plot()
+
+ale2$set.feature("Total_Trans_Amt")
+ale2$plot()
+
+ale2$set.feature("Total_Trans_Ct")
+ale2$plot()
+
+ale2$set.feature("Total_Ct_Chng_Q4_Q1")
+ale2$plot()
+
+ale2$set.feature("Customer_Age")
+ale2$plot()
