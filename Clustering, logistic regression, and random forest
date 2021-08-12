@@ -1,6 +1,5 @@
 #open data and load library
 library(readxl)
-BankChurners <- read_excel("University/DSMA Master/Thesis DSMA/Credit card data/BankChurners.csv/BankChurners.xlsx")
 library(factoextra)
 library(cluster)
 library(fpc)
@@ -23,6 +22,8 @@ library(writexl)
 library(broom)
 library(car)
 library(iml)
+BankChurners <- read_excel("University/DSMA Master/Thesis DSMA/Credit card data/BankChurners.csv/BankChurners.xlsx") #imputed already!
+BankChurners <- read.csv("~/University/DSMA Master/Thesis DSMA/Credit card data/BankChurners.csv/BankChurners (old).csv", sep=";") #not imputed!
 
 #data pre-processing
 str(BankChurners)
@@ -140,7 +141,7 @@ sil.kmeans$data #silhouette for kmeans is 0.3141582
 #plotting the silhouette for rough kmeans
 silho.kmeans2 <- NA
 set.seed(123)
-for (i in 2:10) {
+for (i in 1:10) {
   kmeans.final2 <- kmeans(kmeansdata, centers = i, iter.max = 100, nstart = 10)
   sil.kmeans2 <- SIL(kmeansdata, kmeans.final2$cluster)
   silho.kmeans2[i] <- sil.kmeans2$sil
@@ -217,6 +218,11 @@ for (i in 2:10) {
   silho.roughkmeans[i] <- sil.roughkmeans2$sil
 }
 
+#computing the silhouette for rough kmeans when nClusters = 1
+rough.final111 <- RoughKMeans_LW(rough.kmeansdata, meansMatrix = 2, nClusters = 1, maxIterations = 100)
+sil.roughkmeans111 <- SIL(rough.kmeansdata, rough.final111$upperApprox) #silhouette average for rough kmeans is 0.3563982
+
+#plotting the silhouette onto a line chart
 plot(1:10, silho.roughkmeans,
      xlab = "Number of clusters",
      ylab = "Average Silhouette Width",main="Silhouette for Rough K-Means")
@@ -441,6 +447,21 @@ ggplot(sil.boxplots, aes(x= `No. of clusters`, y=`Average Silhouette`)) +
   geom_line(aes(colour = Method)) +
   ggtitle("Average Silhouette Comparison")
 
+
+
+##########------DESC STAT WITH 5 VARS FOR CLUSTERS 1 AND 2--------
+totaldata <- rbind(cluster1data, cluster2data)
+numeric.data <- totaldata[,c(2,3,8:19,22:23)]
+vars5 <- totaldata[,c(8:10, 16:17, 22:23)]
+data.for.boxplots <- melt(numeric.data, id = "C2")
+fig <- function(width, heigth){
+  options(repr.plot.width = width, repr.plot.height = heigth)
+}
+fig(10, 4)
+ggplot(data.for.boxplots, aes(x=variable, y=value, fill=as.character(C2))) + 
+  geom_boxplot() +
+  facet_wrap(~variable, scale="free") +
+  ggtitle("Comparison of descriptive statistics between clusters 1 and 2")
 
 #########################################################
 ######----------DATA PREP FOR CHURNING PREDICTION--------
